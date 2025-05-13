@@ -119,20 +119,20 @@ Create a file named `services/csvDataService.ts`:
 ```typescript
 import * as fs from 'fs';
 import * as path from 'path';
-import * as csv from 'csv-parser';
+import csvParser from 'csv-parser';
 
 export class CsvDataService {
-  async readCsvFile<T>(filePath: string): Promise<T[]> {
+  async readCsvFile<T extends Record<string, any>>(filePath: string): Promise<T[]> {
     return new Promise((resolve, reject) => {
       const results: T[] = [];
 
       fs.createReadStream(filePath)
-        .pipe(csv())
-        .on('data', (data) => {
+        .pipe(csvParser())
+        .on('data', (data: any) => {
           // Convert numeric fields
           Object.keys(data).forEach(key => {
-            if (!isNaN(Number(data[key]))) {
-              data[key] = Number(data[key]);
+            if (!isNaN(Number(data[ key ]))) {
+              data[ key ] = Number(data[ key ]);
             }
           });
           results.push(data as T);
@@ -140,44 +140,43 @@ export class CsvDataService {
         .on('end', () => {
           resolve(results);
         })
-        .on('error', (error) => {
+        .on('error', (error: Error) => {
           reject(error);
         });
     });
   }
-
-  getCsvSummary<T>(records: T[]): string {
+  getCsvSummary<T extends Record<string, any>>(records: T[]): string {
     if (!records || records.length === 0) {
       return "No data available";
     }
 
-    const firstRecord = records[0];
+    const firstRecord = records[ 0 ];
     const columns = Object.keys(firstRecord);
 
     let summary = `Total records: ${records.length}\n`;
     summary += "Columns:\n";
 
     columns.forEach(column => {
-      const type = typeof firstRecord[column as keyof T];
+      const type = typeof firstRecord[ column ];
       summary += `- ${column} (${type})\n`;
     });
 
     return summary;
   }
 
-  convertRecordsToString<T>(records: T[], limit: number = 10): string {
+  convertRecordsToString<T extends Record<string, any>>(records: T[], limit: number = 10): string {
     if (!records || records.length === 0) {
       return "No data available";
     }
 
-    const columns = Object.keys(records[0]);
+    const columns = Object.keys(records[ 0 ]);
     const recordsToShow = records.slice(0, limit);
 
     let result = columns.join(',') + '\n';
 
     recordsToShow.forEach(record => {
       const values = columns.map(column => {
-        const value = record[column as keyof T];
+        const value = record[ column ];
         return value !== undefined ? value.toString() : '';
       });
       result += values.join(',') + '\n';
@@ -196,6 +195,11 @@ Create a file named `services/dataAnalyticsService.ts`:
 import { AzureOpenAI } from "openai";
 import { CsvDataService } from "./csvDataService";
 
+type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
+
 export class DataAnalyticsService {
   private client: AzureOpenAI;
   private modelName: string;
@@ -205,14 +209,14 @@ export class DataAnalyticsService {
     this.client = new AzureOpenAI({
       endpoint,
       apiKey,
-      deploymentName,
+      deployment: deploymentName,
       apiVersion
     });
     this.modelName = modelName;
     this.csvDataService = new CsvDataService();
   }
 
-  async generateDataSummary<T>(data: T[], dataDescription: string): Promise<string> {
+  async generateDataSummary<T extends Record<string, any>>(data: T[], dataDescription: string): Promise<string> {
     const dataString = this.csvDataService.convertRecordsToString(data, 25); // Show up to 25 records
     const dataSummary = this.csvDataService.getCsvSummary(data);
 
@@ -231,7 +235,7 @@ Please provide a comprehensive summary of this ${dataDescription} data, includin
 Keep your response focused on factual observations from the data.
 `;
 
-    const messages = [
+    const messages: ChatMessage[] = [
       { role: "system", content: "You are a helpful data analyst assistant that provides insights from data." },
       { role: "user", content: prompt }
     ];
@@ -243,10 +247,10 @@ Keep your response focused on factual observations from the data.
       model: this.modelName
     });
 
-    return response.choices[0].message?.content || "No response generated.";
+    return response.choices[ 0 ].message?.content || "No response generated.";
   }
 
-  async analyzeData<T>(data: T[], question: string): Promise<string> {
+  async analyzeData<T extends Record<string, any>>(data: T[], question: string): Promise<string> {
     const dataString = this.csvDataService.convertRecordsToString(data, 25); // Show up to 25 records
     const dataSummary = this.csvDataService.getCsvSummary(data);
 
@@ -262,7 +266,7 @@ Question: ${question}
 Please analyze the data to answer this question. If calculations are needed, explain your methodology clearly. If the data is insufficient to answer the question completely, note what additional data would be helpful.
 `;
 
-    const messages: ChatRequestMessage[] = [
+    const messages: ChatMessage[] = [
       { role: "system", content: "You are a helpful data analyst assistant that provides insights from data." },
       { role: "user", content: prompt }
     ];
@@ -274,10 +278,10 @@ Please analyze the data to answer this question. If calculations are needed, exp
       model: this.modelName
     });
 
-    return response.choices[0].message?.content || "No response generated.";
+    return response.choices[ 0 ].message?.content || "No response generated.";
   }
 
-  async generateVisualizationCode<T>(data: T[], visualizationType: string, description: string): Promise<string> {
+  async generateVisualizationCode<T extends Record<string, any>>(data: T[], visualizationType: string, description: string): Promise<string> {
     const dataString = this.csvDataService.convertRecordsToString(data, 25); // Show up to 25 records
     const dataSummary = this.csvDataService.getCsvSummary(data);
 
@@ -293,7 +297,9 @@ I want to create a ${visualizationType} visualization that shows ${description}.
 Please provide TypeScript code that would create this visualization using a library like Chart.js, D3.js, or similar. The code should be complete and ready to run. Include any necessary package references.
 
 Also, explain why this visualization is appropriate for the data and what insights it might reveal.
-`;    const messages = [
+`;
+
+    const messages: ChatMessage[] = [
       { role: "system", content: "You are a helpful data visualization expert that provides data visualization code." },
       { role: "user", content: prompt }
     ];
@@ -305,10 +311,10 @@ Also, explain why this visualization is appropriate for the data and what insigh
       model: this.modelName
     });
 
-    return response.choices[0].message?.content || "No response generated.";
+    return response.choices[ 0 ].message?.content || "No response generated.";
   }
 
-  async getDataStatistics<T>(data: T[]): Promise<Record<string, any>> {
+  async getDataStatistics<T extends Record<string, any>>(data: T[]): Promise<Record<string, any>> {
     const dataString = this.csvDataService.convertRecordsToString(data, 25); // Show up to 25 records
     const dataSummary = this.csvDataService.getCsvSummary(data);
 
@@ -327,17 +333,19 @@ Calculate and provide the following statistical metrics for the numerical column
 Format your response as a valid JSON object where the keys are the column names and the values are objects with the calculated statistics. Round numerical values to 2 decimal places.
 `;
 
-    const messages: ChatRequestMessage[] = [
+    const messages: ChatMessage[] = [
       { role: "system", content: "You are a helpful data analyst assistant that provides data statistics in JSON format." },
       { role: "user", content: prompt }
-    ];    const response = await this.client.chat.completions.create({
+    ];
+
+    const response = await this.client.chat.completions.create({
       messages,
       temperature: 0,
       max_tokens: 1000,
       model: this.modelName
     });
 
-    const content = response.choices[0].message?.content || "{}";
+    const content = response.choices[ 0 ].message?.content || "{}";
 
     try {
       // Extract JSON from the response (in case there's explanatory text)
@@ -379,7 +387,7 @@ const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || "";
 const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "";
 const modelName = process.env.AZURE_OPENAI_MODEL_NAME || "";
 
-if (!openAIEndpoint || !openAIKey || !deploymentName || !apiVersion || !modelName) {
+if (!endpoint || !apiKey || !deploymentName || !apiVersion || !modelName) {
   throw new Error("Missing required environment variables");
 }
 
@@ -507,11 +515,11 @@ async function main() {  // Initialize services
           const statistics = await dataAnalyticsService.getDataStatistics(salesData);
           console.log("\n=== Data Statistics ===");
 
-          for (const [key, value] of Object.entries(statistics)) {
+          for (const [ key, value ] of Object.entries(statistics)) {
             console.log(`${key}:`);
 
             if (typeof value === 'object' && value !== null) {
-              for (const [statKey, statValue] of Object.entries(value)) {
+              for (const [ statKey, statValue ] of Object.entries(value)) {
                 console.log(`  ${statKey}: ${statValue}`);
               }
             } else {
