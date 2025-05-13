@@ -30,7 +30,7 @@ dotnet add package Microsoft.SemanticKernel --version 1.49.0
 
 ### 3. Create configuration settings
 
-Create an `appsettings.json` file in your project root:
+Create an `appsettings.json` file in your project root and make entry in the project file to copy the settings files to output directory:
 
 ```json
 {
@@ -39,8 +39,8 @@ Create an `appsettings.json` file in your project root:
     "Key": "YOUR_AZURE_OPENAI_API_KEY",
     "CompletionDeploymentName": "YOUR_COMPLETION_DEPLOYMENT_NAME",
     "EmbeddingDeploymentName": "YOUR_EMBEDDING_DEPLOYMENT_NAME",
-    "CompletionModel": "YOUR_COMPLETION_MODEL_NAME",
-    "EmbeddingModel": "YOUR_EMBEDDING_MODEL_NAME"
+    "EmbeddingEndpoint": "YOUR_EMBEDDING_ENDPOINT",
+    "EmbeddingKey": "YOUR_EMBEDDING_KEY"
   },
   "AzureCognitiveSearch": {
     "Endpoint": "https://YOUR_SEARCH_SERVICE_NAME.search.windows.net",
@@ -94,7 +94,6 @@ Create a new file called `EmbeddingService.cs`:
 ```csharp
 using Azure;
 using Azure.AI.OpenAI;
-using OpenAI.Chat;
 
 namespace AzureOpenAIRagImplementation
 {
@@ -114,9 +113,9 @@ namespace AzureOpenAIRagImplementation
         public async Task<float[]> GenerateEmbeddingsAsync(string text)
         {
             var embeddingClient = _openAIClient.GetEmbeddingClient(_embeddingDeploymentName);
-            var response = await embeddingClient.GetEmbeddingsAsync([text]);
+            var response = await embeddingClient.GenerateEmbeddingsAsync([text]);
 
-            return response.Value.Embeddings[0].Values.ToArray();
+            return response.Value.First().ToFloats().ToArray();
         }
     }
 }
@@ -135,127 +134,118 @@ using Azure.Search.Documents.Models;
 
 namespace AzureOpenAIRagImplementation
 {
-    public class VectorStoreService
+  public class VectorStoreService
+  {
+    private readonly string _searchEndpoint;
+    private readonly string _searchKey;
+    private readonly string _indexName;
+    private readonly SearchIndexClient _searchIndexClient;
+    private readonly SearchClient _searchClient;
+
+    public VectorStoreService(string searchEndpoint, string searchKey, string indexName)
     {
-        private readonly string _searchEndpoint;
-        private readonly string _searchKey;
-        private readonly string _indexName;
-        private readonly SearchIndexClient _searchIndexClient;
-        private readonly SearchClient _searchClient;
+      _searchEndpoint = searchEndpoint;
+      _searchKey = searchKey;
+      _indexName = indexName;
 
-        public VectorStoreService(string searchEndpoint, string searchKey, string indexName)
-        {
-            _searchEndpoint = searchEndpoint;
-            _searchKey = searchKey;
-            _indexName = indexName;
+      _searchIndexClient = new SearchIndexClient(
+          new Uri(_searchEndpoint),
+          new AzureKeyCredential(_searchKey));
 
-            _searchIndexClient = new SearchIndexClient(
-                new Uri(_searchEndpoint),
-                new AzureKeyCredential(_searchKey));
+      _searchClient = new SearchClient(
+          new Uri(_searchEndpoint),
+          _indexName,
+          new AzureKeyCredential(_searchKey));
+    }
 
-            _searchClient = new SearchClient(
-                new Uri(_searchEndpoint),
-                _indexName,
-                new AzureKeyCredential(_searchKey));
-        }
+    public async Task CreateIndexIfNotExistsAsync()
+    {
+      // Create the search index with vector search capability
+      var vectorSearchProfile = new VectorSearchProfile("my-vector-profile", "hnsw");
 
-        public async Task CreateIndexIfNotExistsAsync()
-        {
-            // Check if index exists
-            var indexes = await _searchIndexClient.GetIndexNamesAsync();
-            if (indexes.Value.Contains(_indexName))
-            {
-                Console.WriteLine($"Index {_indexName} already exists");
-                return;
-            }
-
-            // Create the search index with vector search capability
-            var vectorSearchProfile = new VectorSearchProfile("my-vector-profile", "hnsw");
-            var algorithm = new HnswAlgorithmConfiguration
-            {
-                Parameters = new HnswParameters
-                {
-                    Metric = VectorSearchAlgorithmMetric.Cosine,
-                    M = 4,
-                    EfConstruction = 400,
-                    EfSearch = 500
-                }
-            };
-
-            // Create fields for the index
-            var fieldBuilder = new FieldBuilder();
-            var fields = new List<SearchField>
+      // Create fields for the index
+      var fieldBuilder = new FieldBuilder();
+      var fields = new List<SearchField>
             {
                 new SearchField("id", SearchFieldDataType.String) { IsKey = true, IsFilterable = true },
                 new SearchField("title", SearchFieldDataType.String) { IsSearchable = true, IsFilterable = true },
                 new SearchField("content", SearchFieldDataType.String) { IsSearchable = true },
-                new SearchField("embedding", SearchFieldDataType.Collection(SearchFieldDataType.Single))
+                new VectorSearchField("embedding", 1536, "my-vector-profile")  // Adjust for your embedding model
                 {
-                    IsSearchable = true,
                     VectorSearchDimensions = 1536,  // Adjust for your embedding model
-                    VectorSearchProfile = "my-vector-profile"
                 },
                 new SearchField("category", SearchFieldDataType.String) { IsFilterable = true, IsFacetable = true },
                 new SearchField("source", SearchFieldDataType.String) { IsFilterable = true, IsFacetable = true }
             };
 
-            // Create the index with the fields
-            var index = new SearchIndex(_indexName)
-            {
-                Fields = fields,
-                VectorSearch = new VectorSearch
-                {
-                    Profiles = { vectorSearchProfile },
-                    Algorithms = { new VectorSearchAlgorithmConfiguration("hnsw", algorithm) }
-                }
-            };
-
-            await _searchIndexClient.CreateOrUpdateIndexAsync(index);
-            Console.WriteLine($"Index {_indexName} created successfully");
-        }
-
-        public async Task AddDocumentsAsync(List<Document> documents)
+      // Create the index with the fields
+      var index = new SearchIndex(_indexName)
+      {
+        Fields = fields,
+        VectorSearch = new VectorSearch
         {
-            // Upload documents to the search index
-            var batch = IndexDocumentsBatch.Upload(documents);
-            var response = await _searchClient.IndexDocumentsAsync(batch);
-
-            Console.WriteLine($"Added {documents.Count} documents to the search index");
-        }
-
-        public async Task<List<Document>> SearchSimilarDocumentsAsync(float[] queryEmbedding, int top = 3)
-        {
-            // Define the vector search configuration
-            var vector = new SearchQueryVector
-            {
-                Value = queryEmbedding,
-                KNearestNeighborsCount = top,
-                Fields = { "embedding" }
-            };
-
-            // Create the search options
-            var searchOptions = new SearchOptions
-            {
-                Size = top,
-                Select = { "id", "title", "content", "category", "source" },
-                VectorSearch = new()
-                {
-                    Queries = { vector }
-                }
-            };
-
-            // Perform the vector search
-            var response = await _searchClient.SearchAsync<Document>(string.Empty, searchOptions);
-
-            var results = new List<Document>();
-            await foreach (var result in response.GetResultsAsync())
-            {
-                results.Add(result.Document);
+          Profiles = { vectorSearchProfile },
+          Algorithms = { new HnswAlgorithmConfiguration("hnsw") {
+              Parameters = new HnswParameters
+              {
+                  M = 4,
+                  EfConstruction = 400,
+                  EfSearch = 500,
+                  Metric = VectorSearchAlgorithmMetric.Cosine
+              }
             }
-
-            return results;
+          }
         }
+      };
+
+      await _searchIndexClient.CreateOrUpdateIndexAsync(index);
+      Console.WriteLine($"Index {_indexName} created successfully");
     }
+
+    public async Task AddDocumentsAsync(List<Document> documents)
+    {
+      // Upload documents to the search index
+      var batch = IndexDocumentsBatch.Upload(documents);
+      var response = await _searchClient.IndexDocumentsAsync(batch);
+
+      Console.WriteLine($"Added {documents.Count} documents to the search index");
+    }
+
+    public async Task<List<Document>> SearchSimilarDocumentsAsync(float[] queryEmbedding, int top = 3)
+    {
+      // Create vector query
+      var vectorQuery = new VectorizedQuery(queryEmbedding)
+      {
+        Exhaustive = true,
+        KNearestNeighborsCount = top,
+        Fields = { "embedding" }
+      };
+
+      // Create the vector search options
+      var options = new SearchOptions
+      {
+        IncludeTotalCount = true,
+        Size = top,
+        Select = { "id", "title", "content", "category", "source" },
+      };
+
+      options.VectorSearch = new VectorSearchOptions
+      {
+        Queries = { vectorQuery }
+      };
+
+      // Perform the vector search
+      var response = await _searchClient.SearchAsync<Document>(options);
+
+      var results = new List<Document>();
+      await foreach (var result in response.Value.GetResultsAsync())
+      {
+        results.Add(result.Document);
+      }
+
+      return results;
+    }
+  }
 }
 ```
 
@@ -421,8 +411,8 @@ var openAIEndpoint = configuration["AzureOpenAI:Endpoint"] ?? throw new InvalidO
 var openAIKey = configuration["AzureOpenAI:Key"] ?? throw new InvalidOperationException("API Key is not configured");
 var completionDeploymentName = configuration["AzureOpenAI:CompletionDeploymentName"] ?? throw new InvalidOperationException("Completion deployment name is not configured");
 var embeddingDeploymentName = configuration["AzureOpenAI:EmbeddingDeploymentName"] ?? throw new InvalidOperationException("Embedding deployment name is not configured");
-var completionModel = configuration["AzureOpenAI:CompletionModel"] ?? throw new InvalidOperationException("Completion model is not configured");
-var embeddingModel = configuration["AzureOpenAI:EmbeddingModel"] ?? throw new InvalidOperationException("Embedding model is not configured");
+var embeddingEndpoint = configuration["AzureOpenAI:EmbeddingEndpoint"] ?? throw new InvalidOperationException("Embedding Endpoint is not configured");
+var embeddingKey = configuration["AzureOpenAI:EmbeddingKey"] ?? throw new InvalidOperationException("Embedding API Key is not configured");
 
 // Get Azure Cognitive Search configuration values
 var searchEndpoint = configuration["AzureCognitiveSearch:Endpoint"];
@@ -430,7 +420,7 @@ var searchKey = configuration["AzureCognitiveSearch:Key"];
 var indexName = configuration["AzureCognitiveSearch:IndexName"];
 
 // Initialize services
-var embeddingService = new EmbeddingService(openAIEndpoint, openAIKey, embeddingDeploymentName);
+var embeddingService = new EmbeddingService(embeddingEndpoint, embeddingKey, embeddingDeploymentName);
 var vectorStoreService = new VectorStoreService(searchEndpoint, searchKey, indexName);
 var ragService = new RagService(openAIEndpoint, openAIKey, completionDeploymentName, embeddingService, vectorStoreService);
 

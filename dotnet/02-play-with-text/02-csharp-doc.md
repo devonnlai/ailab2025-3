@@ -27,15 +27,14 @@ dotnet add package Microsoft.Extensions.Configuration.Json --version 9.0.4
 
 ### 3. Create configuration settings
 
-Create an `appsettings.json` file in your project root:
+Create an `appsettings.json` file in your project root and make entry in the project file to copy the settings files to output directory:
 
 ```json
 {
   "AzureOpenAI": {
     "Endpoint": "https://YOUR_AZURE_OPENAI_RESOURCE_NAME.services.ai.azure.com/",
     "Key": "YOUR_AZURE_OPENAI_API_KEY",
-    "DeploymentName": "YOUR_DEPLOYMENT_NAME",
-    "Model": "YOUR_MODEL_NAME"
+    "DeploymentName": "YOUR_DEPLOYMENT_NAME"
   }
 }
 ```
@@ -224,7 +223,6 @@ var configuration = new ConfigurationBuilder()
 var endpoint = configuration["AzureOpenAI:Endpoint"] ?? throw new InvalidOperationException("Endpoint is not configured");
 var key = configuration["AzureOpenAI:Key"] ?? throw new InvalidOperationException("API Key is not configured");
 var deploymentName = configuration["AzureOpenAI:DeploymentName"] ?? throw new InvalidOperationException("Deployment name is not configured");
-var model = configuration["AzureOpenAI:Model"] ?? throw new InvalidOperationException("Model is not configured");
 
 // Initialize the text processing service
 var textProcessingService = new TextProcessingService(endpoint, key, deploymentName);

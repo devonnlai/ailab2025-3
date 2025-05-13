@@ -35,8 +35,7 @@ Create an `appsettings.json` file in your project root:
   "AzureOpenAI": {
     "Endpoint": "https://YOUR_AZURE_OPENAI_RESOURCE_NAME.services.ai.azure.com/",
     "Key": "YOUR_AZURE_OPENAI_API_KEY",
-    "DeploymentName": "YOUR_DEPLOYMENT_NAME",
-    "Model": "YOUR_MODEL_NAME"
+    "DeploymentName": "YOUR_DEPLOYMENT_NAME"
   }
 }
 ```
@@ -103,9 +102,6 @@ Electronics is the dominant category with $9,323.32 in total sales (84% of all s
 - **Authentication errors**: Double-check your API key and endpoint in `appsettings.json`.
 - **Token limit errors**: If your data is very large, you may need to sample or summarize it before sending it to the Azure OpenAI service.
 - **Invalid JSON errors**: The JSON parsing in the `GetDataStatisticsAsync` method might fail if the model doesn't return properly formatted JSON.
-
-}
-```
 
 ### 4. Create a sample CSV file
 
@@ -192,73 +188,75 @@ Create a new file called `CsvDataService.cs`:
 
 ```csharp
 using System.Globalization;
+using System.Text;
 using CsvHelper;
 using CsvHelper.Configuration;
 
 namespace AzureOpenAIDataInsights
 {
-    public class CsvDataService
+  public class CsvDataService
+  {
+    public List<T> ReadCsvFile<T>(string filePath)
     {
-        public List<T> ReadCsvFile<T>(string filePath)
-        {
-            var config = new CsvConfiguration(CultureInfo.InvariantCulture)
-            {
-                HeaderValidated = null,
-                MissingFieldFound = null,
-            };
+      var config = new CsvConfiguration(CultureInfo.InvariantCulture)
+      {
+        HeaderValidated = null,
+        MissingFieldFound = null,
+      };
 
-            using var streamReader = new StreamReader(filePath);
-            using var csvReader = new CsvReader(streamReader, config);
+      using var streamReader = new StreamReader(filePath);
+      using var csvReader = new CsvReader(streamReader, config);
 
-            return csvReader.GetRecords<T>().ToList();
-        }
-
-        public string GetCsvSummary<T>(List<T> records)
-        {
-            if (records == null || !records.Any())
-                return "No data available";
-
-            var firstRecord = records.First();
-            var properties = typeof(T).GetProperties();
-
-            var summary = new StringBuilder();
-            summary.AppendLine($"Total records: {records.Count}");
-            summary.AppendLine("Columns:");
-
-            foreach (var property in properties)
-            {
-                summary.AppendLine($"- {property.Name} ({property.PropertyType.Name})");
-            }
-
-            return summary.ToString();
-        }
-
-        public string ConvertRecordsToString<T>(List<T> records, int limit = 10)
-        {
-            if (records == null || !records.Any())
-                return "No data available";
-
-            var properties = typeof(T).GetProperties();
-            var recordsToShow = records.Take(limit).ToList();
-
-            var csv = new StringBuilder();
-
-            // Add header
-            csv.AppendLine(string.Join(",", properties.Select(p => p.Name)));
-
-            // Add records
-            foreach (var record in recordsToShow)
-            {
-                var values = properties.Select(p => {
-                    var value = p.GetValue(record);
-                    return value?.ToString() ?? "";
-                });
-                csv.AppendLine(string.Join(",", values));
-            }
-
-            return csv.ToString();
-        }
+      return csvReader.GetRecords<T>().ToList();
     }
+
+    public string GetCsvSummary<T>(List<T> records)
+    {
+      if (records == null || !records.Any())
+        return "No data available";
+
+      var firstRecord = records.First();
+      var properties = typeof(T).GetProperties();
+
+      var summary = new StringBuilder();
+      summary.AppendLine($"Total records: {records.Count}");
+      summary.AppendLine("Columns:");
+
+      foreach (var property in properties)
+      {
+        summary.AppendLine($"- {property.Name} ({property.PropertyType.Name})");
+      }
+
+      return summary.ToString();
+    }
+
+    public string ConvertRecordsToString<T>(List<T> records, int limit = 10)
+    {
+      if (records == null || !records.Any())
+        return "No data available";
+
+      var properties = typeof(T).GetProperties();
+      var recordsToShow = records.Take(limit).ToList();
+
+      var csv = new StringBuilder();
+
+      // Add header
+      csv.AppendLine(string.Join(",", properties.Select(p => p.Name)));
+
+      // Add records
+      foreach (var record in recordsToShow)
+      {
+        var values = properties.Select(p =>
+        {
+          var value = p.GetValue(record);
+          return value?.ToString() ?? "";
+        });
+        csv.AppendLine(string.Join(",", values));
+      }
+
+      return csv.ToString();
+    }
+  }
 }
 ```
 
@@ -284,7 +282,9 @@ namespace AzureOpenAIDataInsights
         {
             _openAIClient = new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(key));
             _deploymentName = deploymentName;
-        }        public async Task<string> GenerateDataSummaryAsync<T>(List<T> data, string dataDescription)
+        }        
+
+        public async Task<string> GenerateDataSummaryAsync<T>(List<T> data, string dataDescription)
         {
             var csvDataService = new CsvDataService();
             var dataString = csvDataService.ConvertRecordsToString(data, 25); // Show up to 25 records
@@ -342,7 +342,9 @@ Here's a sample of the data:
 Question: {question}
 
 Please analyze the data to answer this question. If calculations are needed, explain your methodology clearly. If the data is insufficient to answer the question completely, note what additional data would be helpful.
-";            ChatClient chatClient = _openAIClient.GetChatClient(_deploymentName);
+";            
+            
+            ChatClient chatClient = _openAIClient.GetChatClient(_deploymentName);
 
             var requestOptions = new ChatCompletionOptions()
             {
@@ -381,7 +383,9 @@ I want to create a {visualizationType} visualization that shows {description}.
 Please provide C# code that would create this visualization using a library like OxyPlot, ScottPlot, or even a simple approach that outputs to the console. The code should be complete and ready to run. Include any necessary package references.
 
 Also, explain why this visualization is appropriate for the data and what insights it might reveal.
-";            ChatClient chatClient = _openAIClient.GetChatClient(_deploymentName);
+";            
+            
+            ChatClient chatClient = _openAIClient.GetChatClient(_deploymentName);
 
             var requestOptions = new ChatCompletionOptions()
             {
@@ -421,7 +425,9 @@ Calculate and provide the following statistical metrics for the numerical column
 3. Total and sum where appropriate
 
 Format your response as a valid JSON object where the keys are the column names and the values are objects with the calculated statistics. Round numerical values to 2 decimal places.
-";            ChatClient chatClient = _openAIClient.GetChatClient(_deploymentName);
+";            
+            
+            ChatClient chatClient = _openAIClient.GetChatClient(_deploymentName);
 
             var requestOptions = new ChatCompletionOptions()
             {
@@ -485,7 +491,6 @@ var configuration = new ConfigurationBuilder()
 var endpoint = configuration["AzureOpenAI:Endpoint"] ?? throw new InvalidOperationException("Endpoint is not configured");
 var key = configuration["AzureOpenAI:Key"] ?? throw new InvalidOperationException("API Key is not configured");
 var deploymentName = configuration["AzureOpenAI:DeploymentName"] ?? throw new InvalidOperationException("Deployment name is not configured");
-var model = configuration["AzureOpenAI:Model"] ?? throw new InvalidOperationException("Model is not configured");
 
 // Initialize services
 var csvDataService = new CsvDataService();
@@ -691,3 +696,4 @@ while (true)
     Console.ReadKey();
     Console.Clear();
 }
+```

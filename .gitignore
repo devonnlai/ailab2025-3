@@ -1,0 +1,18 @@
+# Build artifacts
+*.dll
+*.exe
+*.app
+*.log
+*.pdb
+*.cache
+*.manifest
+*.tmp
+*.vs
+dotnet/01-hello-world/AzureOpenAIHelloWorld/Program.cs
+
+**/bin/**
+**/obj/**
+
+**/node_modules/**
+**/dist/**
+**/build/**
