@@ -53,18 +53,19 @@ Update the `tsconfig.json` file with the following content:
 Create a `.env` file in the project root:
 
 ```
+# Azure OpenAI settings for completions
 AZURE_OPENAI_ENDPOINT=https://YOUR_AZURE_OPENAI_RESOURCE_NAME.openai.azure.com/
 AZURE_OPENAI_KEY=YOUR_AZURE_OPENAI_API_KEY
-AZURE_OPENAI_COMPLETION_DEPLOYMENT=YOUR_COMPLETION_DEPLOYMENT_NAME
+AZURE_OPENAI_API_VERSION=2024-04-01-preview
+
+# Specific deployment and model names for RAG implementation
+AZURE_OPENAI_DEPLOYMENT_NAME=YOUR_COMPLETION_DEPLOYMENT_NAME
+AZURE_OPENAI_EMBEDDING_ENDPOINT=YOUR_EMBEDDING_ENDPOINT
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT=YOUR_EMBEDDING_DEPLOYMENT_NAME
-AZURE_OPENAI_COMPLETION_MODEL=YOUR_COMPLETION_MODEL_NAME
-AZURE_OPENAI_EMBEDDING_MODEL=YOUR_EMBEDDING_MODEL_NAME
-AZURE_OPENAI_API_VERSION=2025-03-01-preview
+AZURE_OPENAI_EMBEDDING_KEY=YOUR_EMBEDDING_KEY
+AZURE_OPENAI_EMBEDDING_API_VERSION=2023-05-15
 
-AZURE_EMBEDDING_ENDPOINT=https://YOUR_EMBEDDING_RESOURCE_NAME.openai.azure.com/
-AZURE_EMBEDDING_KEY=YOUR_EMBEDDING_API_KEY
-AZURE_EMBEDDING_API_VERSION=2023-05-15
-
+# Azure Cognitive Search settings
 AZURE_SEARCH_ENDPOINT=https://YOUR_SEARCH_SERVICE_NAME.search.windows.net
 AZURE_SEARCH_KEY=YOUR_SEARCH_SERVICE_KEY
 AZURE_SEARCH_INDEX_NAME=knowledge-index
@@ -155,137 +156,143 @@ Create a file named `services/vectorStoreService.ts`:
 
 ```typescript
 import {
-  SearchClient,
-  SearchIndexClient,
-  AzureKeyCredential,
-  SearchIndex,
-  VectorSearchAlgorithmConfiguration,
-  VectorSearchAlgorithmKind,
-  VectorSearchProfile
+    SearchClient,
+    SearchIndexClient,
+    AzureKeyCredential,
+    SearchIndex,
+    VectorSearchAlgorithmConfiguration,
+    VectorSearchProfile
 } from "@azure/search-documents";
 import { Document } from "../models/document";
 
 export class VectorStoreService {
-  private searchIndexClient: SearchIndexClient;
-  private searchClient: SearchClient;
-  private indexName: string;
+    private searchIndexClient: SearchIndexClient;
+    private searchClient: SearchClient<Document>;
+    private indexName: string;
 
-  constructor(endpoint: string, apiKey: string, indexName: string) {
-    this.indexName = indexName;
-    this.searchIndexClient = new SearchIndexClient(
-      endpoint,
-      new AzureKeyCredential(apiKey)
-    );
-    this.searchClient = new SearchClient(
-      endpoint,
-      indexName,
-      new AzureKeyCredential(apiKey)
-    );
-  }
+    constructor(endpoint: string, apiKey: string, indexName: string) {
+        this.indexName = indexName;
+        this.searchIndexClient = new SearchIndexClient(
+            endpoint,
+            new AzureKeyCredential(apiKey)
+        );
+        this.searchClient = new SearchClient(
+            endpoint,
+            indexName,
+            new AzureKeyCredential(apiKey)
+        );
+    }
+    async createIndexIfNotExists(): Promise<void> {
+        // Check if index exists
+        const indexNamesIterator = await this.searchIndexClient.listIndexesNames();
+        const indexNames = [];
+        for await (const indexName of indexNamesIterator) {
+            indexNames.push(indexName);
+        }
 
-  async createIndexIfNotExists(): Promise<void> {
-    // Check if index exists
-    const indexNames = await this.searchIndexClient.listIndexNames();
-    if (indexNames.includes(this.indexName)) {
-      console.log(`Index ${this.indexName} already exists`);
-      return;
+        if (indexNames.includes(this.indexName)) {
+            console.log(`Index ${this.indexName} already exists`);
+            return;
+        }
+
+        // Create the vector search algorithm and profile
+        const algorithm: VectorSearchAlgorithmConfiguration = {
+            name: "hnsw",
+            kind: "hnsw",
+            parameters: {
+                metric: "cosine",
+                m: 4,
+                efConstruction: 400,
+                efSearch: 500
+            }
+        };
+
+        const vectorSearchProfile: VectorSearchProfile = {
+            name: "my-vector-profile",
+            algorithmConfigurationName: "hnsw"
+        };
+
+        // Create the index with vector search capabilities
+        const index: SearchIndex = {
+            name: this.indexName,
+            fields: [
+                {
+                    name: "id",
+                    type: "Edm.String",
+                    key: true,
+                    filterable: true
+                },
+                {
+                    name: "title",
+                    type: "Edm.String",
+                    searchable: true,
+                    filterable: true
+                },
+                {
+                    name: "content",
+                    type: "Edm.String",
+                    searchable: true
+                },
+                {
+                    name: "embedding",
+                    type: "Collection(Edm.Single)",
+                    searchable: true,
+                    vectorSearchDimensions: 1536, // Adjust for your embedding model
+                    vectorSearchProfileName: "my-vector-profile"
+                },
+                {
+                    name: "category",
+                    type: "Edm.String",
+                    filterable: true,
+                    facetable: true
+                },
+                {
+                    name: "source",
+                    type: "Edm.String",
+                    filterable: true,
+                    facetable: true
+                }
+            ],
+            vectorSearch: {
+                algorithms: [algorithm],
+                profiles: [vectorSearchProfile]
+            }
+        };
+
+        await this.searchIndexClient.createOrUpdateIndex(index);
+        console.log(`Index ${this.indexName} created successfully`);
     }
 
-    // Create the vector search algorithm and profile
-    const algorithm: VectorSearchAlgorithmConfiguration = {
-      name: "hnsw",
-      kind: VectorSearchAlgorithmKind.Hnsw,
-      hnswParameters: {
-        metric: "cosine",
-        m: 4,
-        efConstruction: 400,
-        efSearch: 500
-      }
-    };
-
-    const vectorSearchProfile: VectorSearchProfile = {
-      name: "my-vector-profile",
-      algorithmConfigurationName: "hnsw"
-    };
-
-    // Create the index with vector search capabilities
-    const index: SearchIndex = {
-      name: this.indexName,
-      fields: [
-        {
-          name: "id",
-          type: "Edm.String",
-          key: true,
-          filterable: true
-        },
-        {
-          name: "title",
-          type: "Edm.String",
-          searchable: true,
-          filterable: true
-        },
-        {
-          name: "content",
-          type: "Edm.String",
-          searchable: true
-        },
-        {
-          name: "embedding",
-          type: "Collection(Edm.Single)",
-          searchable: true,
-          vectorSearchDimensions: 1536, // Adjust for your embedding model
-          vectorSearchProfileName: "my-vector-profile"
-        },
-        {
-          name: "category",
-          type: "Edm.String",
-          filterable: true,
-          facetable: true
-        },
-        {
-          name: "source",
-          type: "Edm.String",
-          filterable: true,
-          facetable: true
-        }
-      ],
-      vectorSearch: {
-        algorithms: [algorithm],
-        profiles: [vectorSearchProfile]
-      }
-    };
-
-    await this.searchIndexClient.createOrUpdateIndex(index);
-    console.log(`Index ${this.indexName} created successfully`);
-  }
-
-  async addDocuments(documents: Document[]): Promise<void> {
-    // Add or update documents in the search index
-    const response = await this.searchClient.uploadDocuments(documents);
-    console.log(`Added ${documents.length} documents to the search index`);
-  }
-
-  async searchSimilarDocuments(queryEmbedding: number[], top: number = 3): Promise<Document[]> {
-    // Perform a vector search using the query embedding
-    const results = await this.searchClient.search("", {
-      vectorQueries: [
-        {
-          vector: queryEmbedding,
-          fields: ["embedding"],
-          k: top
-        }
-      ],
-      select: ["id", "title", "content", "category", "source"],
-      top: top
-    });
-
-    const documents: Document[] = [];
-    for await (const result of results.results) {
-      documents.push(result.document as Document);
+    async addDocuments(documents: Document[]): Promise<void> {
+        // Add or update documents in the search index
+        const response = await this.searchClient.uploadDocuments(documents);
+        console.log(`Added ${documents.length} documents to the search index`);
     }
 
-    return documents;
-  }
+    async searchSimilarDocuments(queryEmbedding: number[], top: number = 3): Promise<Document[]> {
+        // Perform a vector search using the query embedding
+        const results = await this.searchClient.search("", {
+            vectorSearchOptions: {
+                queries: [
+                    {
+                        vector: queryEmbedding,
+                        fields: ["embedding"],
+                        kNearestNeighborsCount: top,
+                        kind: 'vector'
+                    }
+                ]
+            },
+            select: ["id", "title", "content", "category", "source"],
+            top: top
+        });
+
+        const documents: Document[] = [];
+        for await (const result of results.results) {
+            documents.push(result.document as Document);
+        }
+
+        return documents;
+    }
 }
 ```
 
@@ -443,100 +450,99 @@ import { getSampleDocuments } from "./data/sampleDataLoader";
 // Load environment variables
 dotenv.config();
 
-async function main() {
-  // Get configuration from environment variables
-  const openAIEndpoint = process.env.AZURE_OPENAI_ENDPOINT || "";
-  const openAIKey = process.env.AZURE_OPENAI_KEY || "";
-  const completionDeploymentName = process.env.AZURE_OPENAI_COMPLETION_DEPLOYMENT || "";
-  const embeddingDeploymentName = process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT || "";
-  const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "";
-  const completionModelName = process.env.AZURE_OPENAI_COMPLETION_MODEL || "";
-  const embeddingModelName = process.env.AZURE_OPENAI_EMBEDDING_MODEL || "";
-  const embeddingApiVersion = process.env.AZURE_EMBEDDING_API_VERSION || "";
-  const embeddingEndpoint = process.env.AZURE_EMBEDDING_ENDPOINT || "";
-  const embeddingKey = process.env.AZURE_EMBEDDING_KEY || "";
+async function main() {  // Get configuration from environment variables
+    const openAIEndpoint = process.env.AZURE_OPENAI_ENDPOINT || "";
+    const openAIKey = process.env.AZURE_OPENAI_KEY || "";
+    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "";
 
-  const searchEndpoint = process.env.AZURE_SEARCH_ENDPOINT || "";
-  const searchKey = process.env.AZURE_SEARCH_KEY || "";
-  const indexName = process.env.AZURE_SEARCH_INDEX_NAME || "";
+    // Get deployment and model names
+    const completionDeploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || "";
+    const completionModelName = process.env.AZURE_OPENAI_MODEL_NAME || "";
+    const embeddingDeploymentName = process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT || "";
+    const embeddingModelName = process.env.AZURE_OPENAI_EMBEDDING_MODEL || "";
+    const embeddingApiVersion = process.env.AZURE_OPENAI_EMBEDDING_API_VERSION || "";
+    const embeddingEndpoint = process.env.AZURE_OPENAI_EMBEDDING_ENDPOINT || "";
+    const embeddingKey = process.env.AZURE_OPENAI_EMBEDDING_KEY || "";
 
-  if (!openAIEndpoint || !openAIKey || !completionDeploymentName || !embeddingDeploymentName ||
-      !apiVersion || !completionModelName || !embeddingModelName ||
-      !searchEndpoint || !searchKey || !indexName ||
-      !embeddingApiVersion || !embeddingEndpoint || !embeddingKey) {
-    throw new Error("Missing required environment variables");
-  }
-
-  // Initialize services
-  const embeddingService = new EmbeddingService(embeddingEndpoint, embeddingKey, embeddingDeploymentName, embeddingModelName, embeddingApiVersion);
-  const vectorStoreService = new VectorStoreService(searchEndpoint, searchKey, indexName);
-  const ragService = new RagService(
-    openAIEndpoint,
-    openAIKey,
-    completionDeploymentName,
-    completionModelName,
-    apiVersion,
-    embeddingService,
-    vectorStoreService
-  );
-
-  try {
-    // Create the search index if it doesn't exist
-    await vectorStoreService.createIndexIfNotExists();
-
-    // Add sample documents to the vector store
-    const sampleDocuments = getSampleDocuments();
-    await ragService.addDocuments(sampleDocuments);
-
-    console.log("Sample documents added to the vector store.");
-    console.log();
-
-    // Sample queries to test the RAG system
-    const sampleQueries = [
-      "What is Azure OpenAI Service?",
-      "How much does Azure OpenAI cost?",
-      "How does the RAG pattern work?",
-      "Why should I use Azure OpenAI instead of direct OpenAI API?",
-      "What are some best practices for prompt engineering?"
-    ];
-
-    for (const query of sampleQueries) {
-      console.log(`Query: ${query}`);
-      console.log();
-
-      try {
-        const answer = await ragService.query(query);
-        console.log(`Answer: ${answer}`);
-      } catch (error) {
-        console.error("Error:", error);
-      }
-
-      console.log("-".repeat(80));
-      console.log();
+    const searchEndpoint = process.env.AZURE_SEARCH_ENDPOINT || "";
+    const searchKey = process.env.AZURE_SEARCH_KEY || "";
+    const indexName = process.env.AZURE_SEARCH_INDEX_NAME || "";
+    if (!openAIEndpoint || !openAIKey || !apiVersion ||
+        !completionDeploymentName || !completionModelName ||
+        !embeddingDeploymentName || !embeddingModelName ||
+        !searchEndpoint || !searchKey || !indexName || !embeddingEndpoint || !embeddingKey) {
+        throw new Error("Missing required environment variables");
     }
+    // Initialize services
+    const embeddingService = new EmbeddingService(embeddingEndpoint, embeddingKey, embeddingDeploymentName, embeddingModelName, embeddingApiVersion);
+    const vectorStoreService = new VectorStoreService(searchEndpoint, searchKey, indexName);
+    const ragService = new RagService(
+        openAIEndpoint,
+        openAIKey,
+        completionDeploymentName,
+        completionModelName,
+        apiVersion,
+        embeddingService,
+        vectorStoreService
+    );
 
-    // Interactive mode
-    console.log("Enter your own queries (or type 'exit' to quit):");
+    try {
+        // Create the search index if it doesn't exist
+        await vectorStoreService.createIndexIfNotExists();
 
-    while (true) {
-      console.log();
-      const userQuery = readline.question("> ");
+        // Add sample documents to the vector store
+        const sampleDocuments = getSampleDocuments();
+        await ragService.addDocuments(sampleDocuments);
 
-      if (!userQuery || userQuery.toLowerCase() === "exit") {
-        break;
-      }
-
-      try {
-        const answer = await ragService.query(userQuery);
+        console.log("Sample documents added to the vector store.");
         console.log();
-        console.log(`Answer: ${answer}`);
-      } catch (error) {
-        console.error("Error:", error);
-      }
+
+        // Sample queries to test the RAG system
+        const sampleQueries = [
+            "What is Azure OpenAI Service?",
+            "How much does Azure OpenAI cost?",
+            "How does the RAG pattern work?",
+            "Why should I use Azure OpenAI instead of direct OpenAI API?",
+            "What are some best practices for prompt engineering?"
+        ];
+
+        for (const query of sampleQueries) {
+            console.log(`Query: ${query}`);
+            console.log();
+
+            try {
+                const answer = await ragService.query(query);
+                console.log(`Answer: ${answer}`);
+            } catch (error) {
+                console.error("Error:", error);
+            }
+
+            console.log("-".repeat(80));
+            console.log();
+        }
+
+        // Interactive mode
+        console.log("Enter your own queries (or type 'exit' to quit):");
+
+        while (true) {
+            console.log();
+            const userQuery = readline.question("> ");
+
+            if (!userQuery || userQuery.toLowerCase() === "exit") {
+                break;
+            }
+
+            try {
+                const answer = await ragService.query(userQuery);
+                console.log();
+                console.log(`Answer: ${answer}`);
+            } catch (error) {
+                console.error("Error:", error);
+            }
+        }
+    } catch (error) {
+        console.error("Error in main:", error);
     }
-  } catch (error) {
-    console.error("Error in main:", error);
-  }
 }
 
 // Call the main function

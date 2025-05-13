@@ -373,8 +373,8 @@ import { SalesRecord } from './models/salesRecord';
 dotenv.config();
 
 // Get configuration from environment variables
-const openAIEndpoint = process.env.AZURE_OPENAI_ENDPOINT || "";
-const openAIKey = process.env.AZURE_OPENAI_KEY || "";
+const endpoint = process.env.AZURE_OPENAI_ENDPOINT || "";
+const apiKey = process.env.AZURE_OPENAI_KEY || "";
 const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || "";
 const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "";
 const modelName = process.env.AZURE_OPENAI_MODEL_NAME || "";
@@ -385,7 +385,7 @@ if (!openAIEndpoint || !openAIKey || !deploymentName || !apiVersion || !modelNam
 
 async function main() {  // Initialize services
   const csvDataService = new CsvDataService();
-  const dataAnalyticsService = new DataAnalyticsService(openAIEndpoint, openAIKey, deploymentName, modelName, apiVersion);
+  const dataAnalyticsService = new DataAnalyticsService(endpoint, apiKey, deploymentName, modelName, apiVersion);
 
   // Load the CSV data
   const dataFilePath = path.join(__dirname, 'data', 'sales_data.csv');
