@@ -125,22 +125,21 @@ Create a file named `textProcessingService.ts`:
 
 ```typescript
 import { AzureOpenAI } from "openai";
+import { TextProcessingResult } from "./textProcessingModels";
 
 export class TextProcessingService {
   private client: AzureOpenAI;
   private deploymentName: string;
   private modelName: string;
-
   constructor(endpoint: string, apiKey: string, deploymentName: string, modelName: string, apiVersion: string) {
-    this.client = new AzureOpenAI({ endpoint, apiKey, deploymentName, apiVersion });
+    this.client = new AzureOpenAI({ endpoint, apiKey, deployment: deploymentName, apiVersion });
     this.deploymentName = deploymentName;
     this.modelName = modelName;
   }
-
   async summarizeText(text: string, maxTokens: number = 150): Promise<string> {
     const messages = [
-      { role: "system", content: "You are a helpful AI assistant that summarizes text concisely." },
-      { role: "user", content: `Please summarize the following text in about 2-3 sentences: \n\n${text}` }
+      { role: "system" as const, content: "You are a helpful AI assistant that summarizes text concisely." },
+      { role: "user" as const, content: `Please summarize the following text in about 2-3 sentences: \n\n${text}` }
     ];
 
     const response = await this.client.chat.completions.create({
@@ -151,11 +150,10 @@ export class TextProcessingService {
 
     return response.choices[0].message?.content || "";
   }
-
   async categorizeText(text: string, maxTokens: number = 30): Promise<string> {
     const messages = [
-      { role: "system", content: "You are a helpful AI assistant that categorizes text into a single appropriate category." },
-      { role: "user", content: `Please categorize the following text into exactly one category (like technology, business, politics, health, etc.). Return only the category name, nothing else.\n\n${text}` }
+      { role: "system" as const, content: "You are a helpful AI assistant that categorizes text into a single appropriate category." },
+      { role: "user" as const, content: `Please categorize the following text into exactly one category (like technology, business, politics, health, etc.). Return only the category name, nothing else.\n\n${text}` }
     ];
 
     const response = await this.client.chat.completions.create({
@@ -167,11 +165,10 @@ export class TextProcessingService {
 
     return response.choices[0].message?.content?.trim() || "";
   }
-
   async extractKeywords(text: string, maxTokens: number = 50): Promise<string[]> {
     const messages = [
-      { role: "system", content: "You are a helpful AI assistant that extracts keywords from text." },
-      { role: "user", content: `Extract 5-7 important keywords from the following text. Return only a JSON array of strings, nothing else:\n\n${text}` }
+      { role: "system" as const, content: "You are a helpful AI assistant that extracts keywords from text." },
+      { role: "user" as const, content: `Extract 5-7 important keywords from the following text. Return only a JSON array of strings, nothing else:\n\n${text}` }
     ];
 
     const response = await this.client.chat.completions.create({
@@ -193,13 +190,13 @@ export class TextProcessingService {
         .map(k => k.trim())
         .filter(k => k.length > 0);
     }
-  }
+  }  async analyzeSentiment(text: string, maxTokens: number = 30): Promise<string> {
+    const messages = [
+      { role: "system" as const, content: "You are a helpful AI assistant that analyzes sentiment." },
+      { role: "user" as const, content: `Analyze the sentiment of the following text. Respond with only one word: 'positive', 'negative', or 'neutral'.\n\n${text}` }
+    ];
 
-  async analyzeSentiment(text: string, maxTokens: number = 30): Promise<string> {
-    const messages: ChatRequestMessage[] = [
-      { role: "system", content: "You are a helpful AI assistant that analyzes sentiment." },
-      { role: "user", content: `Analyze the sentiment of the following text. Respond with only one word: 'positive', 'negative', or 'neutral'.\n\n${text}` }
-    ];    const response = await this.client.chat.completions.create({
+    const response = await this.client.chat.completions.create({
       messages,
       max_tokens: maxTokens,
       temperature: 0.0,
@@ -208,8 +205,7 @@ export class TextProcessingService {
 
     return response.choices[0].message?.content?.trim().toLowerCase() || "";
   }
-
-  async processText(text: string): Promise<any> {
+  async processText(text: string): Promise<TextProcessingResult> {
     // Process text in parallel for efficiency
     const [summary, category, keywords, sentiment] = await Promise.all([
       this.summarizeText(text),
