@@ -21,8 +21,8 @@ cd AzureOpenAIRagImplementation
 ### 2. Add the required NuGet packages
 
 ```bash
-dotnet add package Azure.AI.OpenAI --version 2.1.0
-dotnet add package OpenAI --version 2.1.0
+dotnet add package Azure.AI.OpenAI --version 2.2.0-beta.4
+dotnet add package OpenAI --version 2.2.0-beta.4
 dotnet add package Microsoft.Extensions.Configuration.Json --version 9.0.4
 dotnet add package Azure.Search.Documents --version 11.6.0
 dotnet add package Microsoft.SemanticKernel --version 1.49.0
